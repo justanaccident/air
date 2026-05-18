@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>不同形狀在氣流中的效果模擬</title>
+  <style>
+    :root {
+      --bg: #081b2b;
+      --panel: rgba(8, 27, 43, 0.95);
+      --panel-alt: rgba(15, 48, 80, 0.92);
+      --text: #e5f7ff;
+      --accent: #4fd6ff;
+      --accent-2: #a4ffb2;
+      --danger: #ff7a7a;
+      --shadow: 0 18px 56px rgba(0, 0, 0, 0.35);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top, #122a47 0%, #04131f 42%, #030a13 100%);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+    }
+
+    .container {
+      width: min(1300px, 100%);
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 28px;
+      align-items: stretch;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      padding: 20px 26px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .panel-header h1 {
+      margin: 0;
+      font-size: clamp(1.35rem, 2vw, 2rem);
+      letter-spacing: 0.02em;
+    }
+
+    .panel-header p {
+      margin: 8px 0 0;
+      color: rgba(229, 247, 255, 0.77);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .canvas-wrap {
+      position: relative;
+      flex: 1;
+      min-height: 560px;
+      background: radial-gradient(circle at top left, rgba(79, 214, 255, 0.12), transparent 28%),
+                  radial-gradient(circle at bottom right, rgba(164, 255, 178, 0.08), transparent 24%);
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .info-panel {
+      display: grid;
+      gap: 18px;
+      padding: 24px 26px 24px;
+    }
+
+    .shape-buttons {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .shape-button {
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text);
+      padding: 14px 16px;
+      cursor: pointer;
+      font-size: 0.98rem;
+      transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .shape-button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(79, 214, 255, 0.55);
+    }
+
+    .shape-button.active {
+      background: rgba(79, 214, 255, 0.14);
+      border-color: rgba(79, 214, 255, 0.85);
+      color: #e8fbff;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .stat-card {
+      background: var(--panel-alt);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      padding: 18px 20px;
+      min-height: 110px;
+    }
+
+    .stat-card h3 {
+      margin: 0 0 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #c7e6ff;
+    }
+
+    .stat-card p {
+      margin: 0;
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .control-panel {
+      display: grid;
+      gap: 18px;
+      padding: 24px 26px 28px;
+    }
+
+    .control-panel label {
+      display: grid;
+      gap: 10px;
+      color: rgba(229, 247, 255, 0.9);
+      font-size: 0.95rem;
+    }
+
+    .slider-wrap {
+      display: grid;
+      gap: 10px;
+    }
+
+    .slider-wrap input[type='range'] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .slider-value {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.92rem;
+      color: rgba(229, 247, 255, 0.75);
+    }
+
+    .notes {
+      color: rgba(229, 247, 255, 0.75);
+      font-size: 0.9rem;
+      line-height: 1.65;
+    }
+
+    @media (max-width: 980px) {
+      .container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .panel {
+        border-radius: 20px;
+      }
+      .shape-buttons {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="panel">
+      <div class="panel-header">
+        <h1>不同形狀在氣流中的效果模擬</h1>
+        <p>切換形狀並調整風速，觀察阻力、升力、尾流與分離情況。使用 Canvas 即時渲染氣流粒子動畫。</p>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="flowCanvas"></canvas>
+      </div>
+    </div>
+
+    <div class="panel info-panel">
+      <div class="shape-buttons" id="shapeButtons"></div>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <h3>阻力係數 Cd</h3>
+          <p id="cdValue">0.00</p>
+        </div>
+        <div class="stat-card">
+          <h3>升力係數 Cl</h3>
+          <p id="clValue">0.00</p>
+        </div>
+        <div class="stat-card">
+          <h3>尾流長度</h3>
+          <p id="wakeValue">0.0</p>
+        </div>
+        <div class="stat-card">
+          <h3>氣流分離</h3>
+          <p id="sepValue">穩定</p>
+        </div>
+      </div>
+
+      <div class="control-panel">
+        <label>
+          風速調整
+          <div class="slider-wrap">
+            <input id="windSlider" type="range" min="0.8" max="3.2" step="0.05" value="1.8" />
+            <div class="slider-value">
+              <span>0.8 m/s</span>
+              <span id="windSpeedLabel">1.80 m/s</span>
+              <span>3.2 m/s</span>
+            </div>
+          </div>
+        </label>
+        <div class="notes">
+          <strong>提示：</strong>不同形狀的氣流分離位置與尾流長度會隨風速與外形改變。翼型通常提供較高升力而阻力較低，圓形易產生大尾流，方形與三角形的氣流分離較為明顯。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const shapes = [
+      {
+        id: 'circle',
+        name: '圓形',
+        draw: drawCircle,
+        baseCd: 1.2,
+        baseCl: 0.1,
+        separation: '中等',
+      },
+      {
+        id: 'airfoil',
+        name: '翼型',
+        draw: drawAirfoil,
+        baseCd: 0.18,
+        baseCl: 0.85,
+        separation: '延遲',
+      },
+      {
+        id: 'square',
+        name: '方形',
+        draw: drawSquare,
+        baseCd: 2.3,
+        baseCl: 0.05,
+        separation: '強烈',
+      },
+      {
+        id: 'triangle',
+        name: '三角形',
+        draw: drawTriangle,
+        baseCd: 1.8,
+        baseCl: 0.18,
+        separation: '明顯',
+      },
+      {
+        id: 'flat',
+        name: '平板',
+        draw: drawFlatPlate,
+        baseCd: 1.7,
+        baseCl: 0.02,
+        separation: '立即',
+      },
+    ];
+
+    const canvas = document.getElementById('flowCanvas');
+    const ctx = canvas.getContext('2d');
+    const shapeButtons = document.getElementById('shapeButtons');
+    const cdValue = document.getElementById('cdValue');
+    const clValue = document.getElementById('clValue');
+    const wakeValue = document.getElementById('wakeValue');
+    const sepValue = document.getElementById('sepValue');
+    const windSlider = document.getElementById('windSlider');
+    const windSpeedLabel = document.getElementById('windSpeedLabel');
+
+    let currentShape = shapes[1];
+    let windSpeed = parseFloat(windSlider.value);
+    let particles = [];
+    const particleCount = 160;
+    const flowColor = 'rgba(123, 219, 255, 0.75)';
+    const trailColor = 'rgba(123, 219, 255, 0.12)';
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = rect.height * window.devicePixelRatio;
+      ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+    }
+
+    function initParticles() {
+      particles = [];
+      for (let i = 0; i < particleCount; i++) {
+        particles.push({
+          x: Math.random() * canvas.width / window.devicePixelRatio,
+          y: Math.random() * canvas.height / window.devicePixelRatio,
+          speed: windSpeed * (0.55 + Math.random() * 0.8),
+          size: 1 + Math.random() * 2,
+          phase: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+
+    function updateParticles() {
+      const width = canvas.width / window.devicePixelRatio;
+      const height = canvas.height / window.devicePixelRatio;
+      const centerX = width * 0.42;
+      const centerY = height * 0.5;
+      const dx = windSpeed * 1.6;
+
+      for (const p of particles) {
+        p.x += p.speed * 0.9;
+        p.y += Math.sin(p.phase + p.x * 0.02) * 0.22;
+        p.phase += 0.016;
+
+        if (p.x > width + 20) {
+          p.x = -30;
+          p.y = Math.random() * height;
+          p.speed = windSpeed * (0.55 + Math.random() * 0.8);
+        }
+
+        const distX = p.x - centerX;
+        const distY = p.y - centerY;
+        const radius = 80 + Math.abs(Math.cos(p.phase)) * 18;
+        const nearBody = Math.hypot(distX, distY) < radius + 24;
+        if (nearBody) {
+          const push = (radius + 20 - Math.hypot(distX, distY)) * 0.18;
+          p.x += push;
+          p.y += Math.sign(distY || 0.1) * push * 0.15;
+        }
+
+        if (p.x > centerX + 34 && Math.abs(p.y - centerY) < 95) {
+          p.y += (Math.sin(p.x * 0.08 + p.phase) * 1.2) * (currentShape.id === 'airfoil' ? 0.25 : 1.3);
+        }
+
+        if (windSpeed > 2.4 && currentShape.id === 'flat') {
+          p.y += Math.sin(p.x * 0.16 + p.phase) * 2.2;
+        }
+
+        if (p.y < -20 || p.y > height + 20) {
+          p.y = Math.random() * height;
+        }
+      }
+    }
+
+    function drawBackground() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'rgba(2, 15, 30, 0.16)';
+      ctx.fillRect(0, 0, canvas.width / window.devicePixelRatio, canvas.height / window.devicePixelRatio);
+    }
+
+    function drawParticles() {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = flowColor;
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      for (const p of particles) {
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x - p.speed * 0.8, p.y - Math.sin(p.phase) * 2.8);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      for (const p of particles) {
+        ctx.fillStyle = flowColor;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawShape() {
+      const width = canvas.width / window.devicePixelRatio;
+      const height = canvas.height / window.devicePixelRatio;
+      ctx.save();
+      ctx.translate(width * 0.42, height * 0.5);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.strokeStyle = 'rgba(79, 214, 255, 0.82)';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(79, 214, 255, 0.22)';
+      ctx.shadowBlur = 16;
+      currentShape.draw(ctx, width, height);
+      ctx.restore();
+    }
+
+    function drawCircle(ctx) {
+      ctx.beginPath();
+      ctx.arc(0, 0, 72, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function drawAirfoil(ctx) {
+      ctx.beginPath();
+      ctx.moveTo(-96, 16);
+      ctx.quadraticCurveTo(-16, -46, 108, -24);
+      ctx.quadraticCurveTo(90, 28, -94, 22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function drawSquare(ctx) {
+      ctx.beginPath();
+      ctx.rect(-65, -65, 130, 130);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function drawTriangle(ctx) {
+      ctx.beginPath();
+      ctx.moveTo(-86, 62);
+      ctx.lineTo(98, 0);
+      ctx.lineTo(-86, -62);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function drawFlatPlate(ctx) {
+      ctx.beginPath();
+      ctx.rect(-100, -8, 200, 16);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function updateMetrics() {
+      const speedFactor = windSpeed / 1.8;
+      const cd = currentShape.baseCd * (0.72 + 0.22 * speedFactor * 0.9);
+      const cl = currentShape.baseCl * (0.92 + 0.28 * speedFactor);
+      const wake = Math.max(1.2, 3.6 * speedFactor * (currentShape.baseCd / 1.3));
+      const sep = currentShape.separation;
+
+      cdValue.textContent = cd.toFixed(2);
+      clValue.textContent = cl.toFixed(2);
+      wakeValue.textContent = wake.toFixed(1) + ' m';
+      sepValue.textContent = sep;
+    }
+
+    function animate() {
+      drawBackground();
+      drawParticles();
+      drawShape();
+      updateParticles();
+      requestAnimationFrame(animate);
+    }
+
+    function createShapeButtons() {
+      shapes.forEach((shape) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'shape-button';
+        button.textContent = shape.name;
+        button.dataset.shapeId = shape.id;
+        if (shape === currentShape) {
+          button.classList.add('active');
+        }
+        button.addEventListener('click', () => {
+          currentShape = shape;
+          Array.from(shapeButtons.children).forEach((btn) => btn.classList.remove('active'));
+          button.classList.add('active');
+          updateMetrics();
+        });
+        shapeButtons.appendChild(button);
+      });
+    }
+
+    function handleWindChange() {
+      windSpeed = parseFloat(windSlider.value);
+      windSpeedLabel.textContent = windSpeed.toFixed(2) + ' m/s';
+      initParticles();
+      updateMetrics();
+    }
+
+    window.addEventListener('resize', () => {
+      resizeCanvas();
+      initParticles();
+    });
+
+    windSlider.addEventListener('input', handleWindChange);
+
+    createShapeButtons();
+    resizeCanvas();
+    initParticles();
+    updateMetrics();
+    animate();
+  </script>
+</body>
+</html>
