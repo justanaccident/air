@@ -251,6 +251,174 @@
   </div>
 
   <script>
+    // ==========================================
+    // SDF (帶符號距離函數) 碰撞輔助工具
+    // ==========================================
+
+    /**
+     * 矩形 SDF（Signed Distance Field）
+     * 給定點 (px, py) 與矩形的半寬 hw、半高 hh，
+     * 回傳 { d: 帶符號距離, nx: 法線 x, ny: 法線 y }
+     * d > 0 表示在外部，d < 0 表示穿入內部
+     */
+    function rectSDF(px, py, hw, hh) {
+      // 取絕對值，將問題對稱化到第一象限處理
+      const ax = Math.abs(px);
+      const ay = Math.abs(py);
+      // 計算到邊緣的距離向量 (dx, dy)
+      const dx = ax - hw;
+      const dy = ay - hh;
+
+      // 外部距離：取正值部分的長度
+      const outsideDist = Math.hypot(Math.max(dx, 0), Math.max(dy, 0));
+      // 內部距離：取兩軸中最大值（離邊緣最近的距離，負值）
+      const insideDist = Math.min(Math.max(dx, dy), 0);
+      const d = outsideDist + insideDist;
+
+      // 計算法線方向：指向離點最近的邊
+      let nx, ny;
+      if (dx > dy) {
+        // 最近的邊是左右兩側
+        nx = Math.sign(px) || 1;
+        ny = 0;
+      } else {
+        // 最近的邊是上下兩側
+        nx = 0;
+        ny = Math.sign(py) || 1;
+      }
+      return { d, nx, ny };
+    }
+
+    /**
+     * 點到線段的最短距離（平方值）
+     * 用於多邊形 SDF 的內部計算
+     * a, b 為線段兩端點，p 為查詢點
+     */
+    function pointSegDistSq(px, py, ax, ay, bx, by) {
+      const abx = bx - ax;
+      const aby = by - ay;
+      const apx = px - ax;
+      const apy = py - ay;
+      // 投影比例 t，限制在 [0,1] 確保點落在線段上
+      const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / (abx * abx + aby * aby + 1e-12)));
+      // 最近點到查詢點的距離平方
+      const cx = ax + t * abx - px;
+      const cy = ay + t * aby - py;
+      return cx * cx + cy * cy;
+    }
+
+    /**
+     * 多邊形 SDF
+     * 使用繞數法 (winding number) 判斷內外，配合點到線段距離計算
+     * vertices 為頂點陣列 [{x, y}, ...]
+     * 回傳 { d: 帶符號距離, nx: 法線 x, ny: 法線 y }
+     */
+    function polygonSDF(px, py, vertices) {
+      const n = vertices.length;
+      let minDistSq = Infinity;
+      let closestNx = 0;
+      let closestNy = -1;
+      let winding = 0; // 用於判斷點是否在多邊形內部
+
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        const vix = vertices[i].x;
+        const viy = vertices[i].y;
+        const vjx = vertices[j].x;
+        const vjy = vertices[j].y;
+
+        // 計算到這條邊的距離平方
+        const dSq = pointSegDistSq(px, py, vix, viy, vjx, vjy);
+
+        if (dSq < minDistSq) {
+          minDistSq = dSq;
+          // 計算該邊的外法線方向（將邊向量旋轉 90 度）
+          const edgeX = vjx - vix;
+          const edgeY = vjy - viy;
+          const edgeLen = Math.hypot(edgeX, edgeY) || 1e-12;
+          // 外法線 = 邊向量逆時針旋轉 90 度 = (edgeY, -edgeX)
+          closestNx = edgeY / edgeLen;
+          closestNy = -edgeX / edgeLen;
+        }
+
+        // 繞數法 (winding number)：計算點繞多邊形的圈數
+        if (viy <= py) {
+          if (vjy > py) {
+            // 邊從下往上穿過水平線
+            const cross = (vjx - vix) * (py - viy) - (px - vix) * (vjy - viy);
+            if (cross > 0) winding++;
+          }
+        } else {
+          if (vjy <= py) {
+            // 邊從上往下穿過水平線
+            const cross = (vjx - vix) * (py - viy) - (px - vix) * (vjy - viy);
+            if (cross < 0) winding--;
+          }
+        }
+      }
+
+      const dist = Math.sqrt(minDistSq);
+      // 繞數 !== 0 表示點在多邊形內部，距離取負值
+      const sign = winding !== 0 ? -1 : 1;
+
+      // 確保法線方向指向外側
+      // 從重心到查詢點的向量作為參考方向
+      let cx = 0, cy = 0;
+      for (const v of vertices) { cx += v.x; cy += v.y; }
+      cx /= n; cy /= n;
+      const toCenterX = px - cx;
+      const toCenterY = py - cy;
+      if (closestNx * toCenterX + closestNy * toCenterY < 0) {
+        closestNx = -closestNx;
+        closestNy = -closestNy;
+      }
+
+      return { d: sign * dist, nx: closestNx, ny: closestNy };
+    }
+
+    /**
+     * 翼型 (Airfoil) 貝茲曲線取樣
+     * 將原始繪製翼型的兩條二次貝茲曲線取樣為多邊形頂點
+     * 上表面：(-96,16) → 控制點(-16,-46) → (108,-24)
+     * 下表面：(108,-24) → 控制點(90,28) → (-94,22)
+     * 合併為一個封閉多邊形供 SDF 計算使用
+     */
+    function sampleAirfoilVertices(segments) {
+      const verts = [];
+      // 上表面貝茲曲線取樣：起點 → 控制點 → 終點
+      for (let i = 0; i <= segments; i++) {
+        const t = i / segments;
+        const mt = 1 - t;
+        // 二次貝茲曲線公式：B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+        const x = mt * mt * (-96) + 2 * mt * t * (-16) + t * t * 108;
+        const y = mt * mt * 16 + 2 * mt * t * (-46) + t * t * (-24);
+        verts.push({ x, y });
+      }
+      // 下表面貝茲曲線取樣（反向回繞形成封閉多邊形）
+      for (let i = 1; i <= segments; i++) {
+        const t = i / segments;
+        const mt = 1 - t;
+        const x = mt * mt * 108 + 2 * mt * t * 90 + t * t * (-94);
+        const y = mt * mt * (-24) + 2 * mt * t * 28 + t * t * 22;
+        verts.push({ x, y });
+      }
+      return verts;
+    }
+
+    // 預先計算翼型多邊形頂點（32 段取樣，共 64 個頂點）
+    const airfoilVertices = sampleAirfoilVertices(32);
+
+    // 三角形頂點（與繪製函數中的座標一致）
+    const triangleVertices = [
+      { x: -86, y: 62 },
+      { x: 98, y: 0 },
+      { x: -86, y: -62 },
+    ];
+
+    // ==========================================
+    // 形狀定義（含專屬 SDF 碰撞函數）
+    // ==========================================
+
     const shapes = [
       {
         id: 'circle',
@@ -259,6 +427,18 @@
         baseCd: 1.2,
         baseCl: 0.1,
         separation: '中等',
+        /**
+         * 圓形 SDF：距離 = 到圓心距離 - 半徑
+         * 負值表示在圓內，正值表示在圓外
+         */
+        sdf(px, py) {
+          const r = 72; // 圓的半徑（與繪製一致）
+          const dist = Math.hypot(px, py);
+          const d = dist - r;
+          // 法線方向 = 從圓心指向查詢點的單位向量
+          const len = dist || 1e-12;
+          return { d, nx: px / len, ny: py / len };
+        },
       },
       {
         id: 'airfoil',
@@ -267,6 +447,10 @@
         baseCd: 0.18,
         baseCl: 0.85,
         separation: '延遲',
+        /** 翼型 SDF：使用預計算的多邊形頂點進行精確碰撞檢測 */
+        sdf(px, py) {
+          return polygonSDF(px, py, airfoilVertices);
+        },
       },
       {
         id: 'square',
@@ -275,6 +459,10 @@
         baseCd: 2.3,
         baseCl: 0.05,
         separation: '強烈',
+        /** 方形 SDF：半寬高 65（與繪製的 rect(-65,-65,130,130) 一致）*/
+        sdf(px, py) {
+          return rectSDF(px, py, 65, 65);
+        },
       },
       {
         id: 'triangle',
@@ -283,6 +471,10 @@
         baseCd: 1.8,
         baseCl: 0.18,
         separation: '明顯',
+        /** 三角形 SDF：使用預定義的三角形頂點進行多邊形碰撞 */
+        sdf(px, py) {
+          return polygonSDF(px, py, triangleVertices);
+        },
       },
       {
         id: 'flat',
@@ -291,6 +483,10 @@
         baseCd: 1.7,
         baseCl: 0.02,
         separation: '立即',
+        /** 平板 SDF：寬 200 高 16 的矩形（與繪製的 rect(-100,-8,200,16) 一致）*/
+        sdf(px, py) {
+          return rectSDF(px, py, 100, 8);
+        },
       },
     ];
 
@@ -334,39 +530,78 @@
     function updateParticles() {
       const width = canvas.width / window.devicePixelRatio;
       const height = canvas.height / window.devicePixelRatio;
+      // 模型中心位置（與 drawShape 中 ctx.translate 一致）
       const centerX = width * 0.42;
       const centerY = height * 0.5;
-      const dx = windSpeed * 1.6;
+
+      // SDF 碰撞偵測的安全距離閾值
+      const safeMargin = 8;    // 粒子不可進入的安全邊距（像素）
+      const deflectRange = 40;  // 開始施加偏折力的距離（像素）
 
       for (const p of particles) {
+        // --- 第一步：基本位移 ---
+        // 粒子沿 x 軸前進，同時加入微小的 y 軸正弦擺動模擬紊流
         p.x += p.speed * 0.9;
         p.y += Math.sin(p.phase + p.x * 0.02) * 0.22;
         p.phase += 0.016;
 
+        // --- 第二步：邊界回收 ---
+        // 粒子飛出畫面右側後，從左側重新進入
         if (p.x > width + 20) {
           p.x = -30;
           p.y = Math.random() * height;
           p.speed = windSpeed * (0.55 + Math.random() * 0.8);
         }
 
-        const distX = p.x - centerX;
-        const distY = p.y - centerY;
-        const radius = 80 + Math.abs(Math.cos(p.phase)) * 18;
-        const nearBody = Math.hypot(distX, distY) < radius + 24;
-        if (nearBody) {
-          const push = (radius + 20 - Math.hypot(distX, distY)) * 0.18;
-          p.x += push;
-          p.y += Math.sign(distY || 0.1) * push * 0.15;
+        // --- 第三步：SDF 碰撞偵測與避障 ---
+        // 將粒子座標轉換到模型的局部座標系（模型中心為原點）
+        const localX = p.x - centerX;
+        const localY = p.y - centerY;
+
+        // 呼叫當前形狀的 SDF 函數，取得帶符號距離與法線
+        const res = currentShape.sdf(localX, localY);
+
+        if (res.d < safeMargin) {
+          // ★ 穿透修正 (Penetration Resolution) ★
+          // 粒子已進入安全邊距或模型內部（d < safeMargin）
+          // 立刻沿法線方向將粒子推回至安全邊距外側
+          const pushDist = safeMargin - res.d + 1.5;
+          p.x += res.nx * pushDist;
+          p.y += res.ny * pushDist;
+
+          // 額外的切線滑行力：引導粒子沿著表面切線方向滑動
+          // 切線方向 = 法線旋轉 90 度 = (-ny, nx)
+          // 取 x 方向的分量，確保粒子朝下游方向流動
+          const tangentX = -res.ny;
+          const tangentY = res.nx;
+          // 如果切線方向是朝上游（反向），則翻轉
+          const flowDir = tangentX >= 0 ? 1 : -1;
+          p.x += flowDir * tangentX * p.speed * 0.5;
+          p.y += flowDir * tangentY * p.speed * 0.5;
+
+        } else if (res.d < deflectRange) {
+          // ★ 平滑偏折 (Smooth Deflection) ★
+          // 粒子在偏折範圍內但尚未觸碰安全邊距
+          // 施加與距離成反比的柔和偏折力，使粒子提前繞開模型
+          const factor = (deflectRange - res.d) / deflectRange; // 0 → 1
+          const deflectStrength = factor * factor; // 使用平方衰減，更平滑
+          p.x += res.nx * deflectStrength * 1.2;
+          p.y += res.ny * deflectStrength * 3.0;
         }
 
+        // --- 第四步：尾流紊流效果 ---
+        // 在模型下游（x > centerX + 34），靠近中心線的粒子會受到渦流擾動
         if (p.x > centerX + 34 && Math.abs(p.y - centerY) < 95) {
+          // 翼型流線型設計產生較少紊流，其他形狀紊流較大
           p.y += (Math.sin(p.x * 0.08 + p.phase) * 1.2) * (currentShape.id === 'airfoil' ? 0.25 : 1.3);
         }
 
+        // 平板在高風速下的額外紊流效果
         if (windSpeed > 2.4 && currentShape.id === 'flat') {
           p.y += Math.sin(p.x * 0.16 + p.phase) * 2.2;
         }
 
+        // --- 第五步：上下邊界回收 ---
         if (p.y < -20 || p.y > height + 20) {
           p.y = Math.random() * height;
         }
