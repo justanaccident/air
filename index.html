@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>不同形狀在氣流中的效果模擬</title>
+  <link rel="icon" href="nths.png" type="image/png" />
   <style>
     :root {
       --bg: #081b2b;
@@ -54,6 +55,25 @@
       padding: 20px 26px;
       background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent);
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .header-main {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .school-logo {
+      height: 64px;
+      width: 64px;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 10px rgba(79, 214, 255, 0.35));
+      flex-shrink: 0;
+    }
+
+    .header-text {
+      display: flex;
+      flex-direction: column;
     }
 
     .panel-header h1 {
@@ -181,18 +201,22 @@
       line-height: 1.65;
     }
 
-    @media (max-width: 980px) {
-      .container {
-        grid-template-columns: 1fr;
-      }
-    }
-
     @media (max-width: 640px) {
       .panel {
         border-radius: 20px;
       }
       .shape-buttons {
         grid-template-columns: 1fr;
+      }
+      .header-main {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 12px;
+      }
+      .school-logo {
+        height: 56px;
+        width: 56px;
       }
     }
   </style>
@@ -201,8 +225,13 @@
   <div class="container">
     <div class="panel">
       <div class="panel-header">
-        <h1>不同形狀在氣流中的效果模擬</h1>
-        <p>切換形狀並調整風速，觀察阻力、升力、尾流與分離情況。使用 Canvas 即時渲染氣流粒子動畫。</p>
+        <div class="header-main">
+          <img src="nths.png" alt="楠梓高中校徽" class="school-logo" />
+          <div class="header-text">
+            <h1>不同形狀在氣流中的效果模擬</h1>
+            <p>切換形狀並調整風速，觀察阻力、升力、尾流與分離情況。使用 Canvas 即時渲染氣流粒子動畫。</p>
+          </div>
+        </div>
       </div>
       <div class="canvas-wrap">
         <canvas id="flowCanvas"></canvas>
@@ -244,17 +273,6 @@
           </div>
         </label>
         <label>
-          空氣黏性 (Viscosity)
-          <div class="slider-wrap">
-            <input id="viscositySlider" type="range" min="0.0" max="1.0" step="0.05" value="0.4" />
-            <div class="slider-value">
-              <span>0.0 (無黏性)</span>
-              <span id="viscosityLabel">0.40</span>
-              <span>1.0 (高黏性)</span>
-            </div>
-          </div>
-        </label>
-        <label>
           尾流回填壓力 (Pressure Recovery)
           <div class="slider-wrap">
             <input id="recoverySlider" type="range" min="0.0" max="1.0" step="0.05" value="0.5" />
@@ -266,7 +284,7 @@
           </div>
         </label>
         <div class="notes">
-          <strong>提示：</strong>不同形狀的氣流分離位置與尾流長度會隨風速、黏性與回填壓力改變。<strong>空氣黏性</strong>會引發貼邊流動（康達效應），抑制紊流；<strong>回填壓力</strong>則模擬背風面的低壓吸引力，讓粒子在越過物體後迅速向中心線合攏，填補真空區。
+          <strong>提示：</strong>不同形狀的氣流分離位置與尾流長度會隨風速與回填壓力改變。<strong>空氣黏性</strong>已固定為最大值 (1.00) 以模擬最穩定的層流貼邊流動（康達效應）；<strong>回填壓力</strong>則模擬背風面的低壓吸引力，您可以調整滑桿控制粒子在越過物體後向中心線合攏的強度，填補真空區。
         </div>
       </div>
     </div>
@@ -510,6 +528,22 @@
           return rectSDF(px, py, 100, 8);
         },
       },
+      {
+        id: 'custom',
+        name: '自訂圖形 🎨',
+        draw: drawCustom,
+        baseCd: 1.0,
+        baseCl: 0.0,
+        separation: '自訂',
+        vertices: [],
+        /** 自訂圖形 SDF：利用繞數法進行多邊形碰撞檢測 */
+        sdf(px, py) {
+          if (!this.vertices || this.vertices.length < 3) {
+            return { d: 9999, nx: 0, ny: -1 }; // 尚未繪製時不發生碰撞
+          }
+          return polygonSDF(px, py, this.vertices);
+        },
+      },
     ];
 
     const canvas = document.getElementById('flowCanvas');
@@ -528,14 +562,12 @@
     let currentShape = shapes[1]; // 預設使用翼型
     let windSpeed = parseFloat(windSlider.value);
     
-    // 取得新增的黏性與壓力滑桿元素
-    const viscositySlider = document.getElementById('viscositySlider');
-    const viscosityLabel = document.getElementById('viscosityLabel');
+    // 取得尾流回填壓力滑桿元素
     const recoverySlider = document.getElementById('recoverySlider');
     const recoveryLabel = document.getElementById('recoveryLabel');
     
-    // 解析黏性與回填壓力數值
-    let viscosity = parseFloat(viscositySlider.value);
+    // 固定物理參數設定
+    const viscosity = 1.0; // 空氣黏性固定為最大值 1.00，以獲得穩定的層流與貼邊效果
     let pressureRecovery = parseFloat(recoverySlider.value);
 
     let particles = [];
@@ -597,41 +629,30 @@
         const turbulenceIntensity = (1.0 - viscosity * 0.85) * (windSpeed * 0.38);
         p.phase += 0.016; // 更新波動相位
         
-        // 基礎 X 軸速度漸漸恢復到其基本風速
-        p.vx += (p.baseSpeed - p.vx) * 0.04;
-        
-        // 自然 Y 軸正弦波動（紊流）
-        const naturalWave = Math.sin(p.phase + p.x * 0.02) * turbulenceIntensity;
-        p.vy += (naturalWave - p.vy) * 0.04;
-
-        // --- 2. 邊界回收機制 ---
-        // 粒子飛出右側邊界後，重置回左側
-        if (p.x > width + 20) {
-          p.x = -30;
-          p.y = Math.random() * height;
-          const pSpeed = windSpeed * (0.6 + Math.random() * 0.8);
-          p.vx = pSpeed;
-          p.vy = 0;
-          p.baseSpeed = pSpeed;
+        // 基礎 X 軸�        // --- 4. 尾流合攏機制 (Wake Closure / Pressure Recovery) ---
+        // 當空氣粒子越過物體 (localX > -20) 且進入低壓尾流區時，
+        // 低壓產生的「回填壓力」會將粒子拉向中心線 (centerY)。
+        // 為了避免後面出現無粒子的真空 Bug，不論粒子在陰影內或外，都施加指向中心線的吸引力。
+        if (localX > -20 && localX < 320) {
+          const distToCenter = p.y - centerY;
+          // 距離因子：離物體越遠，回填效應慢慢減弱
+          const distanceFactor = Math.max(0, 1.0 - (localX / 320));
+          
+          // 使用彈性回填力：越偏離中心，拉回力越強。強度由「壓力回復」滑桿控制
+          const pullStrength = (pressureRecovery * 0.008 + viscosity * 0.003) * distanceFactor;
+          p.vy -= distToCenter * pullStrength;
         }
 
-        // --- 3. SDF 碰撞偵測與避障 (包含康達貼邊效應) ---
-        // 將粒子位置轉換至以物體中心為原點的局部座標系
-        const localX = p.x - centerX;
-        const localY = p.y - centerY;
-
-        // 計算目前點到障礙物表面的 Signed Distance Field 與法線向量
-        const res = currentShape.sdf(localX, localY);
-
-        if (res.d < safeMargin) {
-          // A. 穿透修正：立刻將粒子推回安全邊距外，避免穿入物體內部
-          const pushDist = safeMargin - res.d + 1.2;
-          p.x += res.nx * pushDist;
-          p.y += res.ny * pushDist;
-
-          // B. 邊界切線滑行：計算切線方向，並使粒子沿切線流動
-          const tx = -res.ny;
-          const ty = res.nx;
+        // --- 5. 尾流紊流漩渦效果 ---
+        // 在物體下游且靠近中心線的地方，粒子會受到脫落漩渦 (Vortex) 的擾動
+        if (localX > 30 && Math.abs(localY) < 95) {
+          // 平板和圓形產生的脫落紊流較多，翼型產生的流線型阻力極小，故紊流也極小
+          const turbFactor = currentShape.id === 'airfoil' ? 0.15 : (currentShape.id === 'flat' ? 1.6 : 1.0);
+          
+          // 空氣黏性會壓制並平滑化脫落紊流
+          const viscosityDamp = 1.0 - viscosity * 0.8;
+          p.vy += Math.sin(localX * 0.08 + p.phase) * 0.45 * turbFactor * viscosityDamp * (windSpeed * 0.5);
+        }t ty = res.nx;
           
           // 確保切線方向與原本前進方向 (vx) 同向
           const dot = p.vx * tx + p.vy * ty;
@@ -818,11 +839,304 @@
       sepValue.textContent = sep;
     }
 
+    // ==========================================
+    // 自訂繪圖功能之全域變數與事件監聽
+    // ==========================================
+    let isDrawingMode = false;
+    let isDrawing = false;
+    let tempVertices = [];
+
+    /**
+     * 自訂圖形繪製函數
+     */
+    function drawCustom(ctx) {
+      if (currentShape.vertices && currentShape.vertices.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(currentShape.vertices[0].x, currentShape.vertices[0].y);
+        for (let i = 1; i < currentShape.vertices.length; i++) {
+          ctx.lineTo(currentShape.vertices[i].x, currentShape.vertices[i].y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        // 若尚未繪製，顯示提示資訊
+        ctx.fillStyle = 'rgba(229, 247, 255, 0.4)';
+        ctx.font = '16px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('尚未繪製自訂圖形，請點擊下方重繪按鈕', 0, 0);
+      }
+    }
+
+    /**
+     * 取得滑鼠或觸控在 Canvas 中的座標，並考量高 DPI 縮放比例
+     */
+    function getCanvasCoords(e) {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      const x = (clientX - rect.left) * (canvas.width / rect.width / window.devicePixelRatio);
+      const y = (clientY - rect.top) * (canvas.height / rect.height / window.devicePixelRatio);
+      return { x, y };
+    }
+
+    function startDrawing(e) {
+      if (!isDrawingMode) return;
+      isDrawing = true;
+      const coords = getCanvasCoords(e);
+      const width = canvas.width / window.devicePixelRatio;
+      const height = canvas.height / window.devicePixelRatio;
+      const centerX = width * 0.42;
+      const centerY = height * 0.5;
+      
+      // 記錄相對於物體中心的坐標
+      tempVertices = [{ x: coords.x - centerX, y: coords.y - centerY }];
+    }
+
+    function drawMove(e) {
+      if (!isDrawingMode || !isDrawing) return;
+      const coords = getCanvasCoords(e);
+      const width = canvas.width / window.devicePixelRatio;
+      const height = canvas.height / window.devicePixelRatio;
+      const centerX = width * 0.42;
+      const centerY = height * 0.5;
+      
+      const newPt = { x: coords.x - centerX, y: coords.y - centerY };
+      const lastPt = tempVertices[tempVertices.length - 1];
+      
+      // 移動距離超過 5px 才記錄，避免頂點過多造成碰撞計算卡頓
+      const dist = Math.hypot(newPt.x - lastPt.x, newPt.y - lastPt.y);
+      if (dist > 5) {
+        tempVertices.push(newPt);
+      }
+    }
+
+    function endDrawing() {
+      if (!isDrawingMode || !isDrawing) return;
+      isDrawing = false;
+      
+      if (tempVertices.length >= 3) {
+        const customShape = shapes.find(s => s.id === 'custom');
+        customShape.vertices = [...tempVertices];
+        
+        // 估算自訂圖形的空氣動力學係數 (Cd, Cl)
+        estimateAerodynamics(customShape);
+        
+        isDrawingMode = false;
+        initParticles();
+        updateMetrics();
+      } else {
+        isDrawingMode = false;
+      }
+    }
+
+    /**
+     * 估算自訂圖形的阻力係數 Cd 與升力係數 Cl
+     * 讓學生能從中學習形狀與氣體動力學的關係
+     */
+    function estimateAerodynamics(shape) {
+      const verts = shape.vertices;
+      if (!verts || verts.length < 3) return;
+
+      let minX = Infinity, maxX = -Infinity;
+      let minY = Infinity, maxY = -Infinity;
+      for (const v of verts) {
+        if (v.x < minX) minX = v.x;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.y > maxY) maxY = v.y;
+      }
+
+      const w = maxX - minX;
+      const h = maxY - minY;
+
+      // 1. 阻力係數 (Cd) 估算：
+      // 長寬比 (迎風高度 h 與長度 w 的比例) 是主要因素。扁平長形阻力小，垂直高阻力大。
+      const aspect = h / (w || 1e-12);
+      let cd = 0.15 + aspect * 0.7; // 線性插值
+      
+      // 檢查前端鈍度 (最左側頂點附近斜率)
+      let noseIdx = 0;
+      for (let i = 0; i < verts.length; i++) {
+        if (verts[i].x === minX) noseIdx = i;
+      }
+      const prev = verts[(noseIdx - 1 + verts.length) % verts.length];
+      const next = verts[(noseIdx + 1) % verts.length];
+      const dy1 = Math.abs(prev.y - verts[noseIdx].y);
+      const dx1 = Math.abs(prev.x - verts[noseIdx].x) || 1e-12;
+      const dy2 = Math.abs(next.y - verts[noseIdx].y);
+      const dx2 = Math.abs(next.x - verts[noseIdx].x) || 1e-12;
+      const slope = (dy1 / dx1 + dy2 / dx2) / 2;
+      
+      if (slope > 1.5) {
+        cd += 0.3; // 鈍頭增加阻力
+      }
+      
+      shape.baseCd = Math.max(0.12, Math.min(2.4, cd));
+
+      // 2. 升力係數 (Cl) 估算：
+      // 根據幾何中線向上彎曲度 (Camber) 來決定升力
+      const bins = 8;
+      let totalCamber = 0;
+      let validBins = 0;
+      
+      for (let b = 0; b < bins; b++) {
+        const binMinX = minX + (w / bins) * b;
+        const binMaxX = minX + (w / bins) * (b + 1);
+        let ptsInBin = verts.filter(v => v.x >= binMinX && v.x <= binMaxX);
+        
+        if (ptsInBin.length > 0) {
+          let minYVal = Infinity;
+          let maxYVal = -Infinity;
+          for (const p of ptsInBin) {
+            if (p.y < minYVal) minYVal = p.y;
+            if (p.y > maxYVal) maxYVal = p.y;
+          }
+          if (minYVal !== Infinity && maxYVal !== -Infinity) {
+            // Camber = -(minYVal + maxYVal) / 2 (向上彎為正值，因為 canvas 向上 Y 為負)
+            const camber = -(minYVal + maxYVal) / 2;
+            totalCamber += camber;
+            validBins++;
+          }
+        }
+      }
+
+      const avgCamber = validBins > 0 ? (totalCamber / validBins) : 0;
+      // 典型高升力翼型 Camber 約 15px，對應 Cl = 0.8 左右
+      let cl = (avgCamber / 18) * 0.7;
+      
+      shape.baseCl = Math.max(-1.2, Math.min(1.5, cl));
+
+      // 3. 根據 Cd 自動判斷分離現象等級
+      if (shape.baseCd < 0.3) {
+        shape.separation = '延遲';
+      } else if (shape.baseCd < 0.8) {
+        shape.separation = '中等';
+      } else if (shape.baseCd < 1.6) {
+        shape.separation = '明顯';
+      } else {
+        shape.separation = '強烈';
+      }
+    }
+
+    /**
+     * 進入自訂繪圖模式
+     */
+    function startCustomDrawingMode() {
+      isDrawingMode = true;
+      isDrawing = false;
+      tempVertices = [];
+      const customShape = shapes.find(s => s.id === 'custom');
+      customShape.vertices = []; // 清空現有頂點
+    }
+
+    /**
+     * 繪製編輯狀態下的格線畫面與導引
+     */
+    function drawDrawingScreen() {
+      const width = canvas.width / window.devicePixelRatio;
+      const height = canvas.height / window.devicePixelRatio;
+      const centerX = width * 0.42;
+      const centerY = height * 0.5;
+
+      // 1. 背景與格線
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#081b2b';
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = 'rgba(79, 214, 255, 0.05)';
+      ctx.lineWidth = 1;
+      const gridSize = 25;
+      for (let x = 0; x < width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+
+      // 中心參考軸
+      ctx.strokeStyle = 'rgba(79, 214, 255, 0.15)';
+      ctx.beginPath();
+      ctx.moveTo(centerX, 0);
+      ctx.lineTo(centerX, height);
+      ctx.moveTo(0, centerY);
+      ctx.lineTo(width, centerY);
+      ctx.stroke();
+
+      // 2. 標準尺寸參考圓圈 (虛線)
+      ctx.strokeStyle = 'rgba(164, 255, 178, 0.35)';
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 72, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]); // 重置虛線
+
+      // 3. 繪製當前軌跡
+      if (tempVertices.length > 0) {
+        ctx.strokeStyle = 'rgba(79, 214, 255, 0.85)';
+        ctx.fillStyle = 'rgba(79, 214, 255, 0.1)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(tempVertices[0].x + centerX, tempVertices[0].y + centerY);
+        for (let i = 1; i < tempVertices.length; i++) {
+          ctx.lineTo(tempVertices[i].x + centerX, tempVertices[i].y + centerY);
+        }
+        if (isDrawing) {
+          ctx.stroke();
+        } else {
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        // 繪製控制頂點小圓點
+        ctx.fillStyle = '#a4ffb2';
+        for (const pt of tempVertices) {
+          ctx.beginPath();
+          ctx.arc(pt.x + centerX, pt.y + centerY, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // 4. 文字說明
+      ctx.fillStyle = '#e5f7ff';
+      ctx.font = '16px "Segoe UI", Tahoma, Geneva, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('【繪圖模式】請在畫布中央按住並拖曳滑鼠，繪製一個封閉圖形', width / 2, 40);
+      
+      ctx.fillStyle = 'rgba(229, 247, 255, 0.6)';
+      ctx.font = '13px "Segoe UI", Tahoma, Geneva, sans-serif';
+      ctx.fillText('放開滑鼠時圖形將自動閉合。綠色虛線為標準物體尺寸參考範圍', width / 2, 70);
+    }
+
+    function updateMetrics() {
+      const speedFactor = windSpeed / 1.8;
+      const cd = currentShape.baseCd * (0.72 + 0.22 * speedFactor * 0.9);
+      const cl = currentShape.baseCl * (0.92 + 0.28 * speedFactor);
+      const wake = Math.max(1.2, 3.6 * speedFactor * (currentShape.baseCd / 1.3));
+      const sep = currentShape.separation;
+
+      cdValue.textContent = cd.toFixed(2);
+      clValue.textContent = cl.toFixed(2);
+      wakeValue.textContent = wake.toFixed(1) + ' m';
+      sepValue.textContent = sep;
+    }
+
     function animate() {
-      drawBackground();
-      drawParticles();
-      drawShape();
-      updateParticles();
+      if (isDrawingMode) {
+        drawDrawingScreen();
+      } else {
+        drawBackground();
+        drawParticles();
+        drawShape();
+        updateParticles();
+      }
       requestAnimationFrame(animate);
     }
 
@@ -840,23 +1154,38 @@
           currentShape = shape;
           Array.from(shapeButtons.children).forEach((btn) => btn.classList.remove('active'));
           button.classList.add('active');
+          
+          if (shape.id === 'custom') {
+            redrawBtn.style.display = 'block';
+            if (!shape.vertices || shape.vertices.length < 3) {
+              startCustomDrawingMode();
+            }
+          } else {
+            redrawBtn.style.display = 'none';
+          }
           updateMetrics();
         });
         shapeButtons.appendChild(button);
       });
+
+      // 建立重繪自訂圖形按鈕 (預設隱藏)
+      const redrawBtn = document.createElement('button');
+      redrawBtn.type = 'button';
+      redrawBtn.className = 'shape-button';
+      redrawBtn.id = 'redrawBtn';
+      redrawBtn.textContent = '重繪自訂圖形 ✏️';
+      redrawBtn.style.display = currentShape.id === 'custom' ? 'block' : 'none';
+      redrawBtn.style.gridColumn = '1 / -1';
+      redrawBtn.style.background = 'rgba(164, 255, 178, 0.1)';
+      redrawBtn.style.borderColor = 'rgba(164, 255, 178, 0.4)';
+      redrawBtn.addEventListener('click', startCustomDrawingMode);
+      shapeButtons.appendChild(redrawBtn);
     }
 
     function handleWindChange() {
       windSpeed = parseFloat(windSlider.value);
       windSpeedLabel.textContent = windSpeed.toFixed(2) + ' m/s';
       initParticles();
-      updateMetrics();
-    }
-
-    // 新增空氣黏性變更事件處理
-    function handleViscosityChange() {
-      viscosity = parseFloat(viscositySlider.value);
-      viscosityLabel.textContent = viscosity.toFixed(2);
       updateMetrics();
     }
 
@@ -873,8 +1202,25 @@
     });
 
     windSlider.addEventListener('input', handleWindChange);
-    viscositySlider.addEventListener('input', handleViscosityChange);
     recoverySlider.addEventListener('input', handleRecoveryChange);
+
+    // 綁定畫布上的滑鼠與觸控事件 (自訂繪圖)
+    canvas.addEventListener('mousedown', startDrawing);
+    canvas.addEventListener('touchstart', (e) => {
+      if (isDrawingMode) e.preventDefault();
+      startDrawing(e);
+    });
+
+    canvas.addEventListener('mousemove', drawMove);
+    canvas.addEventListener('touchmove', (e) => {
+      if (isDrawingMode) e.preventDefault();
+      drawMove(e);
+    });
+
+    window.addEventListener('mouseup', endDrawing);
+    window.addEventListener('touchend', (e) => {
+      if (isDrawingMode) endDrawing(e);
+    });
 
     createShapeButtons();
     resizeCanvas();
